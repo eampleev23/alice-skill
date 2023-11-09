@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"github.com/go-resty/resty/v2"
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
@@ -8,10 +10,22 @@ import (
 )
 
 func TestWebhook(t *testing.T) {
-	// описываем ожидаемое тело ответа при успешном запросе
-	successBody := `{"response":{"text":"Извините, я пока ничего не умею"},"version":"1.0"}`
+	// тип http.HandlerFunc реализует интерфейс http.Handler
+	// это поможет передать хэндлер тестовому серверу
+	handler := http.HandlerFunc(webhook)
+	// запускаем тестовый сервер, будет выбран первый свободный порт
+	srv := httptest.NewServer(handler)
+	// останавливаем сервер после завершения теста
+	defer srv.Close()
 
-	// описываем набор данных: метод запроса, ожидаемый код ответа, ожидаемое тело
+	// ожидаемое тело ответа при успешном запросе
+	successBody := `{
+        "response": {
+            "text": "Извините, я пока ничего не умею"
+        },
+        "version": "1.0"
+    }`
+	// Описываем набор данных:метод запроса, ожидаемый код ответа, ожидаемое тело
 	testCases := []struct {
 		method       string
 		expectedCode int
@@ -25,18 +39,19 @@ func TestWebhook(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.method, func(t *testing.T) {
-			r := httptest.NewRequest(tc.method, "/", nil)
-			w := httptest.NewRecorder()
-
-			// вызовем хэндлер как обычную функцию без запуска сервера
-			webhook(w, r)
-
-			assert.Equal(t, tc.expectedCode, w.Code, "Код ответа не совпадает с ожидаемым")
-
-			// проверим корректность полученного тела ответа если мы его ожидаем
+			// делаем запрос с помощью библиотеки resty к адресу запущенного сервера,
+			// который хранится в поле url соответствующей структуры
+			req := resty.New().R()
+			req.Method = tc.method
+			req.URL = srv.URL
+			// посмотрим как выглядит адрес сервера
+			fmt.Println("srv.URL ", srv.URL)
+			resp, err := req.Send()
+			assert.NoError(t, err, "Error making HTTP request ")
+			assert.Equal(t, tc.expectedCode, resp.StatusCode(), "Response code didn't match expected")
+			// Проверяем корректность полученного ответа если мы его ожидаем
 			if tc.expectedBody != "" {
-				// assert.JSONq помогает сравнить 2 json строки
-				assert.JSONEq(t, tc.expectedBody, w.Body.String(), "Тело ответа не совпадает с ожидаемым")
+				assert.JSONEq(t, tc.expectedBody, string(resp.Body()))
 			}
 		})
 	}
