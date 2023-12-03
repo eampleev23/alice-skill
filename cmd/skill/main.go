@@ -3,12 +3,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/eampleev23/alice-skill.git/internal/logger"
 	"github.com/eampleev23/alice-skill.git/internal/models"
 	"go.uber.org/zap"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // функция main вызывается автоматически при запуске приложения
@@ -93,20 +95,39 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return
 	}
-	// Заполням модель ответа
-	resp := models.Response{
-		Response: models.ResponsePayload{
-			Text: "Извините, я пока ничего не умею",
-		},
-		Version: "1.0",
-	}
-	w.Header().Set("Content-Type", "application/json")
 
-	// Сериализуем ответ сервера
-	enc := json.NewEncoder(w)
-	if err := enc.Encode(resp); err != nil {
-		logger.Log.Debug("error encoding response", zap.Error(err))
-		return
+	text := "Для вас нет новых сообщений"
+
+	// Первый запрос новой сессии
+	if req.Session.New {
+		// Обрабатываем поле Timezone запроса
+		tz, err := time.LoadLocation(req.Timezone)
+		if err != nil {
+			logger.Log.Debug("cannot parse timezone")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		// Получаем текущее время в часовом поясе пользователя
+		now := time.Now().In(tz)
+		hour, minute, _ := now.Clock()
+
+		// Формируем текст ответа
+		text = fmt.Sprintf("Точное время %d часов, %d минут. %s", hour, minute, text)
+
+		// Заполняем модель ответа
+		resp := models.Response{
+			Response: models.ResponsePayload{
+				Text: text, // Алиса проговорит новый текст
+			},
+			Version: "1.0",
+		}
+		w.Header().Set("Content-Type", "application/json")
+
+		// сериализуем ответ сервера
+		enc := json.NewEncoder(w)
+		if err := enc.Encode(resp); err != nil {
+			logger.Log.Debug("error encoding response", zap.Error(err))
+		}
+		logger.Log.Debug("sending HTTP 200 response")
 	}
-	logger.Log.Debug("Sending HTTP 200 response")
 }
